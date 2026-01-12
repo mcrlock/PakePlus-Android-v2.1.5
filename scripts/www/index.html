@@ -191,6 +191,23 @@
                         <i class="fa fa-stop mr-2"></i> 停止扫描
                     </button>
                 </div>
+                
+                <!-- 摄像头权限提示 -->
+                <div id="camera-permission" class="mt-6 bg-yellow-50 border-l-4 border-yellow-400 p-4 hidden">
+                    <div class="flex">
+                        <div class="flex-shrink-0">
+                            <i class="fa fa-exclamation-triangle text-yellow-400"></i>
+                        </div>
+                        <div class="ml-3">
+                            <p class="text-sm text-yellow-700">
+                                <span class="font-medium">需要摄像头权限</span> - 请允许此应用访问您的摄像头以扫描条形码。
+                                <button id="request-permission" class="text-blue-600 hover:text-blue-800 font-medium ml-2">
+                                    授予权限
+                                </button>
+                            </p>
+                        </div>
+                    </div>
+                </div>
             </div>
             
             <!-- 扫描结果展示区 -->
