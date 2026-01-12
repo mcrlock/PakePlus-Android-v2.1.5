@@ -1,11 +1,1553 @@
 <!DOCTYPE html>
-<html lang="en">
-    <head>
-        <meta charset="UTF-8" />
-        <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-        <title>PakePlus</title>
-    </head>
-    <body>
-        PakePlus
-    </body>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+    <title>条形码价格查询系统</title>
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Font Awesome -->
+    <link href="https://cdn.jsdelivr.net/npm/font-awesome@4.7.0/css/font-awesome.min.css" rel="stylesheet">
+    <!-- QuaggaJS 条形码扫描库 -->
+    <script src="https://cdn.jsdelivr.net/npm/@ericblade/quagga2/dist/quagga.min.js"></script>
+    <!-- PapaParse CSV解析库 -->
+    <script src="https://cdn.jsdelivr.net/npm/papaparse@5.4.1/papaparse.min.js"></script>
+    <!-- Chart.js 图表库 -->
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.8/dist/chart.umd.min.js"></script>
+    
+    <!-- Tailwind 配置 -->
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    colors: {
+                        primary: '#1e40af', // 商业蓝
+                        secondary: '#3b82f6',
+                        accent: '#f59e0b',
+                        success: '#10b981',
+                        danger: '#ef4444',
+                        warning: '#f59e0b',
+                        info: '#3b82f6',
+                        light: '#f3f4f6',
+                        dark: '#1f2937'
+                    },
+                    fontFamily: {
+                        sans: ['Inter', 'system-ui', 'sans-serif']
+                    }
+                }
+            }
+        }
+    </script>
+    
+    <style type="text/tailwindcss">
+        @layer utilities {
+            .content-auto {
+                content-visibility: auto;
+            }
+            .transition-all-300 {
+                transition: all 300ms ease-in-out;
+            }
+            .shadow-custom {
+                box-shadow: 0 4px 20px rgba(0, 0, 0, 0.1);
+            }
+            .bg-gradient-blue {
+                background: linear-gradient(135deg, #1e40af 0%, #3b82f6 100%);
+            }
+        }
+        
+        /* 自定义样式 */
+        #interactive.viewport {
+            position: relative;
+            width: 100%;
+            height: 400px;
+            overflow: hidden;
+            text-align: center;
+            background-color: #000;
+        }
+        
+        #interactive.viewport > canvas,
+        #interactive.viewport > video {
+            max-width: 100%;
+            width: 100%;
+        }
+        
+        canvas.drawing,
+        canvas.drawingBuffer {
+            position: absolute;
+            left: 0;
+            top: 0;
+        }
+        
+        .price-animation {
+            animation: fadeInScale 0.5s ease-out;
+        }
+        
+        @keyframes fadeInScale {
+            0% { opacity: 0; transform: scale(0.8); }
+            100% { opacity: 1; transform: scale(1); }
+        }
+        
+        .scan-line {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 4px;
+            background: rgba(59, 130, 246, 0.8);
+            animation: scan 2s linear infinite;
+            z-index: 10;
+        }
+        
+        @keyframes scan {
+            0% { top: 0; }
+            50% { top: 100%; }
+            100% { top: 0; }
+        }
+        
+        .tab-active {
+            border-bottom: 3px solid #1e40af;
+            color: #1e40af;
+            font-weight: 600;
+        }
+        
+        .price-high {
+            color: #ef4444;
+        }
+        
+        .price-medium {
+            color: #f59e0b;
+        }
+        
+        .price-low {
+            color: #10b981;
+        }
+    </style>
+</head>
+<body class="bg-gray-50 font-sans">
+    <!-- 顶部导航栏 -->
+    <header class="bg-gradient-blue text-white shadow-md">
+        <div class="container mx-auto px-4 py-4 flex justify-between items-center">
+            <div class="flex items-center space-x-2">
+                <i class="fa fa-barcode text-2xl"></i>
+                <h1 class="text-xl font-bold">条形码价格查询系统</h1>
+            </div>
+            <nav>
+                <ul class="flex space-x-6">
+                    <li><a href="#scan" class="hover:text-accent transition-all-300 flex items-center"><i class="fa fa-camera mr-1"></i> 扫描</a></li>
+                    <li><a href="#manage" class="hover:text-accent transition-all-300 flex items-center"><i class="fa fa-database mr-1"></i> 管理</a></li>
+                    <li><a href="#history" class="hover:text-accent transition-all-300 flex items-center"><i class="fa fa-line-chart mr-1"></i> 历史</a></li>
+                </ul>
+            </nav>
+        </div>
+    </header>
+
+    <!-- 主内容区 -->
+    <main class="container mx-auto px-4 py-8">
+        <!-- 功能选项卡 -->
+        <div class="mb-8 border-b border-gray-200">
+            <ul class="flex flex-wrap -mb-px text-sm font-medium text-center" id="tabNav" role="tablist">
+                <li class="mr-2" role="presentation">
+                    <button class="inline-block p-4 tab-active" id="scan-tab" data-tab="scan" type="button" role="tab" aria-controls="scan" aria-selected="true">
+                        <i class="fa fa-camera mr-2"></i>条形码扫描
+                    </button>
+                </li>
+                <li class="mr-2" role="presentation">
+                    <button class="inline-block p-4 hover:text-gray-600" id="manage-tab" data-tab="manage" type="button" role="tab" aria-controls="manage" aria-selected="false">
+                        <i class="fa fa-database mr-2"></i>商品管理
+                    </button>
+                </li>
+                <li role="presentation">
+                    <button class="inline-block p-4 hover:text-gray-600" id="history-tab" data-tab="history" type="button" role="tab" aria-controls="history" aria-selected="false">
+                        <i class="fa fa-line-chart mr-2"></i>价格历史
+                    </button>
+                </li>
+            </ul>
+        </div>
+
+        <!-- 扫描功能区 -->
+        <div id="scan" class="tab-content active">
+            <div class="bg-white rounded-lg shadow-custom p-6 mb-6">
+                <div class="mb-4">
+                    <h2 class="text-xl font-bold text-gray-800 mb-2">条形码扫描</h2>
+                    <p class="text-gray-600">点击下方按钮开始扫描商品条形码，系统将自动识别并显示对应价格信息。</p>
+                </div>
+                
+                <!-- 扫描区域 -->
+                <div class="relative mb-6">
+                    <div id="interactive" class="viewport rounded-lg overflow-hidden">
+                        <div class="scan-line"></div>
+                    </div>
+                    <div id="scan-status" class="text-center py-4 text-gray-600">
+                        <p>请点击"开始扫描"按钮启动摄像头</p>
+                    </div>
+                </div>
+                
+                <!-- 扫描控制按钮 -->
+                <div class="flex justify-center space-x-4">
+                    <button id="start-scanner" class="bg-primary hover:bg-blue-700 text-white font-bold py-3 px-6 rounded-lg shadow transition-all-300 flex items-center">
+                        <i class="fa fa-play mr-2"></i> 开始扫描
+                    </button>
+                    <button id="stop-scanner" class="bg-gray-500 hover:bg-gray-600 text-white font-bold py-3 px-6 rounded-lg shadow transition-all-300 flex items-center" disabled>
+                        <i class="fa fa-stop mr-2"></i> 停止扫描
+                    </button>
+                </div>
+            </div>
+            
+            <!-- 扫描结果展示区 -->
+            <div id="scan-result" class="bg-white rounded-lg shadow-custom p-6 hidden">
+                <div class="flex items-start">
+                    <div class="flex-shrink-0 bg-blue-100 rounded-full p-3 mr-4">
+                        <i class="fa fa-tag text-primary text-2xl"></i>
+                    </div>
+                    <div class="flex-grow">
+                        <h3 class="text-xl font-bold text-gray-800 mb-2" id="product-name">商品名称</h3>
+                        <div class="flex items-baseline mb-2">
+                            <span class="text-3xl font-bold text-primary mr-2 price-animation" id="product-price">¥0.00</span>
+                            <span class="text-gray-500" id="product-unit">/ 单位</span>
+                        </div>
+                        <div class="grid grid-cols-2 gap-4 mb-4">
+                            <div>
+                                <p class="text-sm text-gray-500">条形码</p>
+                                <p class="font-medium" id="product-barcode">1234567890123</p>
+                            </div>
+                            <div>
+                                <p class="text-sm text-gray-500">库存</p>
+                                <p class="font-medium" id="product-stock">100</p>
+                            </div>
+                        </div>
+                        <div class="text-sm text-gray-500">
+                            <p>类别: <span id="product-category">未分类</span></p>
+                            <p>更新时间: <span id="product-updated">2023-07-01 12:00</span></p>
+                        </div>
+                    </div>
+                </div>
+                
+                <!-- 价格趋势指示器 -->
+                <div class="mt-6 pt-4 border-t border-gray-200">
+                    <h4 class="text-sm font-semibold text-gray-700 mb-2">价格趋势</h4>
+                    <div class="flex items-center">
+                        <div id="price-trend" class="flex items-center">
+                            <i class="fa fa-arrow-right text-gray-500 mr-2"></i>
+                            <span class="text-gray-600">价格稳定</span>
+                        </div>
+                        <button id="view-history" class="ml-auto text-primary hover:text-blue-700 text-sm font-medium flex items-center">
+                            查看历史 <i class="fa fa-chevron-right ml-1 text-xs"></i>
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </div>
+        
+        <!-- 商品管理功能区 -->
+        <div id="manage" class="tab-content hidden">
+            <div class="bg-white rounded-lg shadow-custom p-6 mb-6">
+                <div class="mb-6">
+                    <h2 class="text-xl font-bold text-gray-800 mb-2">商品数据管理</h2>
+                    <p class="text-gray-600">通过CSV文件批量导入商品数据，或手动添加/编辑商品信息。</p>
+                </div>
+                
+                <!-- 数据导入区域 -->
+                <div class="mb-8">
+                    <h3 class="text-lg font-semibold text-gray-700 mb-4">CSV数据导入</h3>
+                    <div class="border-2 border-dashed border-gray-300 rounded-lg p-6 text-center">
+                        <input type="file" id="csv-file" accept=".csv" class="hidden">
+                        <label for="csv-file" class="cursor-pointer">
+                            <div class="flex flex-col items-center justify-center py-6">
+                                <i class="fa fa-upload text-gray-400 text-4xl mb-3"></i>
+                                <p class="text-gray-600 mb-2">点击或拖拽CSV文件到此处</p>
+                                <p class="text-gray-500 text-sm">支持的格式: 条形码,商品名称,价格,库存,单位,类别</p>
+                            </div>
+                        </label>
+                    </div>
+                    <div id="import-status" class="mt-4 text-center hidden"></div>
+                </div>
+                
+                <!-- 手动添加商品 -->
+                <div class="mb-8">
+                    <h3 class="text-lg font-semibold text-gray-700 mb-4">手动添加商品</h3>
+                    <form id="add-product-form" class="grid grid-cols-1 md:grid-cols-2 gap-6">
+                        <div>
+                            <label for="barcode" class="block text-sm font-medium text-gray-700 mb-1">条形码 *</label>
+                            <input type="text" id="barcode" name="barcode" class="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary focus:border-primary" required>
+                        </div>
+                        <div>
+                            <label for="name" class="block text-sm font-medium text-gray-700 mb-1">商品名称 *</label>
+                            <input type="text" id="name" name="name" class="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary focus:border-primary" required>
+                        </div>
+                        <div>
+                            <label for="price" class="block text-sm font-medium text-gray-700 mb-1">价格 *</label>
+                            <input type="number" id="price" name="price" step="0.01" min="0" class="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary focus:border-primary" required>
+                        </div>
+                        <div>
+                            <label for="stock" class="block text-sm font-medium text-gray-700 mb-1">库存</label>
+                            <input type="number" id="stock" name="stock" min="0" class="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary focus:border-primary">
+                        </div>
+                        <div>
+                            <label for="unit" class="block text-sm font-medium text-gray-700 mb-1">单位</label>
+                            <input type="text" id="unit" name="unit" class="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary focus:border-primary">
+                        </div>
+                        <div>
+                            <label for="category" class="block text-sm font-medium text-gray-700 mb-1">类别</label>
+                            <input type="text" id="category" name="category" class="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary focus:border-primary">
+                        </div>
+                        <div class="md:col-span-2">
+                            <button type="submit" class="bg-primary hover:bg-blue-700 text-white font-bold py-2 px-6 rounded-lg shadow transition-all-300">
+                                <i class="fa fa-plus mr-2"></i> 添加商品
+                            </button>
+                        </div>
+                    </form>
+                </div>
+                
+                <!-- 商品列表 -->
+                <div>
+                    <div class="flex justify-between items-center mb-4">
+                        <h3 class="text-lg font-semibold text-gray-700">商品列表</h3>
+                        <div class="flex items-center">
+                            <div class="relative mr-4">
+                                <input type="text" id="search-product" placeholder="搜索商品..." class="pl-10 pr-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary focus:border-primary">
+                                <i class="fa fa-search absolute left-3 top-3 text-gray-400"></i>
+                            </div>
+                            <button id="export-data" class="bg-green-600 hover:bg-green-700 text-white font-medium py-2 px-4 rounded-lg shadow transition-all-300 flex items-center">
+                                <i class="fa fa-download mr-2"></i> 导出数据
+                            </button>
+                        </div>
+                    </div>
+                    
+                    <div class="overflow-x-auto">
+                        <table class="min-w-full bg-white">
+                            <thead class="bg-gray-100">
+                                <tr>
+                                    <th class="py-3 px-4 text-left text-sm font-semibold text-gray-700">条形码</th>
+                                    <th class="py-3 px-4 text-left text-sm font-semibold text-gray-700">商品名称</th>
+                                    <th class="py-3 px-4 text-left text-sm font-semibold text-gray-700">价格</th>
+                                    <th class="py-3 px-4 text-left text-sm font-semibold text-gray-700">库存</th>
+                                    <th class="py-3 px-4 text-left text-sm font-semibold text-gray-700">单位</th>
+                                    <th class="py-3 px-4 text-left text-sm font-semibold text-gray-700">类别</th>
+                                    <th class="py-3 px-4 text-left text-sm font-semibold text-gray-700">操作</th>
+                                </tr>
+                            </thead>
+                            <tbody id="product-table-body">
+                                <!-- 商品数据将通过JavaScript动态填充 -->
+                            </tbody>
+                        </table>
+                    </div>
+                    
+                    <!-- 分页控件 -->
+                    <div class="flex justify-between items-center mt-4">
+                        <div class="text-sm text-gray-600">
+                            显示 <span id="showing-records">0-0</span> 条，共 <span id="total-records">0</span> 条记录
+                        </div>
+                        <div class="flex space-x-2">
+                            <button id="prev-page" class="bg-gray-200 hover:bg-gray-300 text-gray-700 font-medium py-1 px-3 rounded transition-all-300" disabled>
+                                <i class="fa fa-chevron-left"></i>
+                            </button>
+                            <button id="next-page" class="bg-gray-200 hover:bg-gray-300 text-gray-700 font-medium py-1 px-3 rounded transition-all-300" disabled>
+                                <i class="fa fa-chevron-right"></i>
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+        
+        <!-- 价格历史功能区 -->
+        <div id="history" class="tab-content hidden">
+            <div class="bg-white rounded-lg shadow-custom p-6 mb-6">
+                <div class="mb-6">
+                    <h2 class="text-xl font-bold text-gray-800 mb-2">价格历史记录</h2>
+                    <p class="text-gray-600">查看商品价格的历史变动趋势，帮助分析定价策略。</p>
+                </div>
+                
+                <!-- 商品选择器 -->
+                <div class="mb-6">
+                    <label for="history-product-select" class="block text-sm font-medium text-gray-700 mb-2">选择商品</label>
+                    <div class="relative">
+                        <select id="history-product-select" class="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary focus:border-primary appearance-none">
+                            <option value="">-- 请选择商品 --</option>
+                            <!-- 商品选项将通过JavaScript动态填充 -->
+                        </select>
+                        <div class="pointer-events-none absolute inset-y-0 right-0 flex items-center px-4 text-gray-700">
+                            <i class="fa fa-chevron-down"></i>
+                        </div>
+                    </div>
+                </div>
+                
+                <!-- 时间范围选择 -->
+                <div class="mb-6 grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <div>
+                        <label for="date-from" class="block text-sm font-medium text-gray-700 mb-2">开始日期</label>
+                        <input type="date" id="date-from" class="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary focus:border-primary">
+                    </div>
+                    <div>
+                        <label for="date-to" class="block text-sm font-medium text-gray-700 mb-2">结束日期</label>
+                        <input type="date" id="date-to" class="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary focus:border-primary">
+                    </div>
+                </div>
+                
+                <!-- 价格趋势图表 -->
+                <div class="mb-6">
+                    <div class="bg-gray-50 rounded-lg p-4">
+                        <canvas id="price-chart" height="300"></canvas>
+                    </div>
+                </div>
+                
+                <!-- 价格变动记录 -->
+                <div>
+                    <h3 class="text-lg font-semibold text-gray-700 mb-4">价格变动记录</h3>
+                    <div class="overflow-x-auto">
+                        <table class="min-w-full bg-white">
+                            <thead class="bg-gray-100">
+                                <tr>
+                                    <th class="py-3 px-4 text-left text-sm font-semibold text-gray-700">日期</th>
+                                    <th class="py-3 px-4 text-left text-sm font-semibold text-gray-700">价格</th>
+                                    <th class="py-3 px-4 text-left text-sm font-semibold text-gray-700">变动</th>
+                                </tr>
+                            </thead>
+                            <tbody id="price-history-table">
+                                <!-- 价格历史数据将通过JavaScript动态填充 -->
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </main>
+
+    <!-- 页脚 -->
+    <footer class="bg-gray-800 text-white py-6">
+        <div class="container mx-auto px-4">
+            <div class="flex flex-col md:flex-row justify-between items-center">
+                <div class="mb-4 md:mb-0">
+                    <div class="flex items-center space-x-2">
+                        <i class="fa fa-barcode text-xl"></i>
+                        <span class="text-lg font-bold">条形码价格查询系统</span>
+                    </div>
+                    <p class="text-gray-400 text-sm mt-1">高效管理商品价格信息</p>
+                </div>
+                <div class="flex space-x-6">
+                    <a href="#" class="text-gray-400 hover:text-white transition-all-300">
+                        <i class="fa fa-question-circle"></i> 帮助
+                    </a>
+                    <a href="#" class="text-gray-400 hover:text-white transition-all-300">
+                        <i class="fa fa-info-circle"></i> 关于
+                    </a>
+                </div>
+            </div>
+            <div class="mt-6 pt-4 border-t border-gray-700 text-center text-gray-400 text-sm">
+                &copy; 2023 条形码价格查询系统 | 版权所有
+            </div>
+        </div>
+    </footer>
+
+    <!-- 编辑商品模态框 -->
+    <div id="edit-modal" class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 hidden">
+        <div class="bg-white rounded-lg shadow-lg w-full max-w-md mx-4">
+            <div class="flex justify-between items-center border-b border-gray-200 px-6 py-4">
+                <h3 class="text-lg font-semibold text-gray-800">编辑商品信息</h3>
+                <button id="close-modal" class="text-gray-400 hover:text-gray-600">
+                    <i class="fa fa-times"></i>
+                </button>
+            </div>
+            <form id="edit-product-form" class="p-6">
+                <input type="hidden" id="edit-barcode">
+                <div class="mb-4">
+                    <label for="edit-name" class="block text-sm font-medium text-gray-700 mb-1">商品名称</label>
+                    <input type="text" id="edit-name" class="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary focus:border-primary">
+                </div>
+                <div class="mb-4">
+                    <label for="edit-price" class="block text-sm font-medium text-gray-700 mb-1">价格</label>
+                    <input type="number" id="edit-price" step="0.01" min="0" class="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary focus:border-primary">
+                </div>
+                <div class="mb-4">
+                    <label for="edit-stock" class="block text-sm font-medium text-gray-700 mb-1">库存</label>
+                    <input type="number" id="edit-stock" min="0" class="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary focus:border-primary">
+                </div>
+                <div class="mb-4">
+                    <label for="edit-unit" class="block text-sm font-medium text-gray-700 mb-1">单位</label>
+                    <input type="text" id="edit-unit" class="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary focus:border-primary">
+                </div>
+                <div class="mb-6">
+                    <label for="edit-category" class="block text-sm font-medium text-gray-700 mb-1">类别</label>
+                    <input type="text" id="edit-category" class="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary focus:border-primary">
+                </div>
+                <div class="flex justify-end space-x-3">
+                    <button type="button" id="cancel-edit" class="bg-gray-200 hover:bg-gray-300 text-gray-700 font-medium py-2 px-4 rounded transition-all-300">
+                        取消
+                    </button>
+                    <button type="submit" class="bg-primary hover:bg-blue-700 text-white font-medium py-2 px-4 rounded transition-all-300">
+                        保存修改
+                    </button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- 通知提示框 -->
+    <div id="notification" class="fixed bottom-4 right-4 bg-white rounded-lg shadow-lg p-4 max-w-sm transform translate-y-full opacity-0 transition-all duration-300 z-50">
+        <div class="flex items-start">
+            <div id="notification-icon" class="flex-shrink-0 rounded-full p-2 mr-3">
+                <i id="notification-icon-i" class="fa"></i>
+            </div>
+            <div class="flex-grow">
+                <h4 id="notification-title" class="text-sm font-semibold text-gray-800 mb-1"></h4>
+                <p id="notification-message" class="text-sm text-gray-600"></p>
+            </div>
+            <button id="close-notification" class="text-gray-400 hover:text-gray-600 ml-4">
+                <i class="fa fa-times"></i>
+            </button>
+        </div>
+    </div>
+
+    <script>
+        // 全局变量
+        let products = {}; // 商品数据存储
+        let currentPage = 1;
+        const itemsPerPage = 10;
+        let priceChart = null;
+        let isScannerRunning = false;
+        
+        // 初始化应用
+        document.addEventListener('DOMContentLoaded', function() {
+            // 加载本地存储的商品数据
+            loadProducts();
+            
+            // 初始化选项卡切换
+            initTabs();
+            
+            // 初始化扫描功能
+            initScanner();
+            
+            // 初始化商品管理功能
+            initProductManagement();
+            
+            // 初始化价格历史功能
+            initPriceHistory();
+            
+            // 初始化通知功能
+            initNotification();
+        });
+        
+        // 加载商品数据
+        function loadProducts() {
+            const storedProducts = localStorage.getItem('barcodeProducts');
+            if (storedProducts) {
+                products = JSON.parse(storedProducts);
+                updateProductList();
+                updateHistoryProductSelect();
+            } else {
+                // 初始化一些示例数据
+                const sampleProducts = {
+                    "6901234567892": {
+                        barcode: "6901234567892",
+                        name: "可口可乐 330ml",
+                        price: 3.50,
+                        stock: 120,
+                        unit: "瓶",
+                        category: "饮料",
+                        priceHistory: [
+                            { date: "2023-06-01", price: 3.50 },
+                            { date: "2023-05-15", price: 3.60 },
+                            { date: "2023-04-01", price: 3.50 }
+                        ],
+                        createdAt: "2023-04-01",
+                        updatedAt: "2023-06-01"
+                    },
+                    "6909876543215": {
+                        barcode: "6909876543215",
+                        name: "康师傅红烧牛肉面 108g",
+                        price: 4.50,
+                        stock: 80,
+                        unit: "袋",
+                        category: "方便面",
+                        priceHistory: [
+                            { date: "2023-06-10", price: 4.50 },
+                            { date: "2023-05-01", price: 4.20 }
+                        ],
+                        createdAt: "2023-05-01",
+                        updatedAt: "2023-06-10"
+                    },
+                    "6912345678901": {
+                        barcode: "6912345678901",
+                        name: "农夫山泉 550ml",
+                        price: 2.00,
+                        stock: 200,
+                        unit: "瓶",
+                        category: "饮料",
+                        priceHistory: [
+                            { date: "2023-06-15", price: 2.00 },
+                            { date: "2023-03-01", price: 1.80 }
+                        ],
+                        createdAt: "2023-03-01",
+                        updatedAt: "2023-06-15"
+                    }
+                };
+                
+                products = sampleProducts;
+                saveProducts();
+                updateProductList();
+                updateHistoryProductSelect();
+            }
+        }
+        
+        // 保存商品数据到本地存储
+        function saveProducts() {
+            localStorage.setItem('barcodeProducts', JSON.stringify(products));
+        }
+        
+        // 初始化选项卡切换
+        function initTabs() {
+            const tabButtons = document.querySelectorAll('#tabNav button');
+            const tabContents = document.querySelectorAll('.tab-content');
+            
+            tabButtons.forEach(button => {
+                button.addEventListener('click', () => {
+                    const tabId = button.getAttribute('data-tab');
+                    
+                    // 更新选项卡按钮状态
+                    tabButtons.forEach(btn => {
+                        btn.classList.remove('tab-active');
+                        btn.classList.add('hover:text-gray-600');
+                    });
+                    button.classList.add('tab-active');
+                    button.classList.remove('hover:text-gray-600');
+                    
+                    // 更新选项卡内容显示
+                    tabContents.forEach(content => {
+                        content.classList.add('hidden');
+                    });
+                    document.getElementById(tabId).classList.remove('hidden');
+                    
+                    // 如果切换到历史页面且有选中的商品，更新图表
+                    if (tabId === 'history' && document.getElementById('history-product-select').value) {
+                        updatePriceChart(document.getElementById('history-product-select').value);
+                    }
+                });
+            });
+            
+            // 导航链接点击事件
+            document.querySelectorAll('nav a').forEach(link => {
+                link.addEventListener('click', (e) => {
+                    e.preventDefault();
+                    const targetId = link.getAttribute('href').substring(1);
+                    document.getElementById(`${targetId}-tab`).click();
+                });
+            });
+            
+            // 查看历史按钮点击事件
+            document.getElementById('view-history').addEventListener('click', () => {
+                document.getElementById('history-tab').click();
+            });
+        }
+        
+        // 初始化扫描功能
+        function initScanner() {
+            const startScannerBtn = document.getElementById('start-scanner');
+            const stopScannerBtn = document.getElementById('stop-scanner');
+            const scanStatus = document.getElementById('scan-status');
+            
+            startScannerBtn.addEventListener('click', () => {
+                if (!isScannerRunning) {
+                    startScanner();
+                }
+            });
+            
+            stopScannerBtn.addEventListener('click', () => {
+                if (isScannerRunning) {
+                    stopScanner();
+                }
+            });
+            
+            // 配置QuaggaJS
+            function startScanner() {
+                Quagga.init({
+                    inputStream: {
+                        name: "Live",
+                        type: "LiveStream",
+                        target: document.querySelector('#interactive'),
+                        constraints: {
+                            facingMode: "environment",
+                            width: { min: 640 },
+                            height: { min: 480 }
+                        }
+                    },
+                    locator: {
+                        patchSize: "medium",
+                        halfSample: true
+                    },
+                    numOfWorkers: navigator.hardwareConcurrency || 4,
+                    decoder: {
+                        readers: [
+                            "ean_reader",
+                            "ean_8_reader",
+                            "code_128_reader",
+                            "code_39_reader",
+                            "code_39_vin_reader",
+                            "codabar_reader",
+                            "upc_reader",
+                            "upc_e_reader"
+                        ]
+                    },
+                    locate: true
+                }, function(err) {
+                    if (err) {
+                        console.error(err);
+                        showNotification('扫描器启动失败', '无法访问摄像头，请确保已授予摄像头访问权限。', 'error');
+                        return;
+                    }
+                    
+                    Quagga.start();
+                    isScannerRunning = true;
+                    startScannerBtn.disabled = true;
+                    stopScannerBtn.disabled = false;
+                    scanStatus.innerHTML = '<p class="text-green-600">扫描器已启动，请将条形码对准摄像头</p>';
+                    
+                    // 更改按钮样式
+                    startScannerBtn.classList.add('bg-gray-500');
+                    startScannerBtn.classList.remove('bg-primary', 'hover:bg-blue-700');
+                    stopScannerBtn.classList.remove('bg-gray-500');
+                    stopScannerBtn.classList.add('bg-red-500', 'hover:bg-red-600');
+                });
+                
+                // 监听扫描结果
+                Quagga.onDetected(handleScanResult);
+            }
+            
+            function stopScanner() {
+                Quagga.stop();
+                isScannerRunning = false;
+                startScannerBtn.disabled = false;
+                stopScannerBtn.disabled = true;
+                scanStatus.innerHTML = '<p>请点击"开始扫描"按钮启动摄像头</p>';
+                
+                // 更改按钮样式
+                startScannerBtn.classList.remove('bg-gray-500');
+                startScannerBtn.classList.add('bg-primary', 'hover:bg-blue-700');
+                stopScannerBtn.classList.add('bg-gray-500');
+                stopScannerBtn.classList.remove('bg-red-500', 'hover:bg-red-600');
+                
+                // 移除扫描结果监听
+                Quagga.offDetected(handleScanResult);
+            }
+            
+            function handleScanResult(result) {
+                const barcode = result.codeResult.code;
+                console.log('扫描到条形码:', barcode);
+                
+                // 震动反馈（如果设备支持）
+                if (navigator.vibrate) {
+                    navigator.vibrate(100);
+                }
+                
+                // 查找商品信息
+                const product = products[barcode];
+                if (product) {
+                    showScanResult(product);
+                    showNotification('扫描成功', `已找到商品: ${product.name}`, 'success');
+                } else {
+                    showNotification('未找到商品', `未找到条形码 ${barcode} 对应的商品信息`, 'warning');
+                    document.getElementById('scan-result').classList.add('hidden');
+                }
+                
+                // 停止扫描
+                stopScanner();
+            }
+            
+            function showScanResult(product) {
+                document.getElementById('product-name').textContent = product.name;
+                document.getElementById('product-price').textContent = `¥${product.price.toFixed(2)}`;
+                document.getElementById('product-unit').textContent = `/ ${product.unit || '单位'}`;
+                document.getElementById('product-barcode').textContent = product.barcode;
+                document.getElementById('product-stock').textContent = product.stock || 0;
+                document.getElementById('product-category').textContent = product.category || '未分类';
+                document.getElementById('product-updated').textContent = formatDate(product.updatedAt);
+                
+                // 更新价格趋势指示器
+                updatePriceTrendIndicator(product);
+                
+                // 显示结果区域
+                document.getElementById('scan-result').classList.remove('hidden');
+                
+                // 添加动画效果
+                document.getElementById('product-price').classList.remove('price-animation');
+                void document.getElementById('product-price').offsetWidth; // 触发重排
+                document.getElementById('product-price').classList.add('price-animation');
+            }
+            
+            function updatePriceTrendIndicator(product) {
+                const trendElement = document.getElementById('price-trend');
+                const history = product.priceHistory || [];
+                
+                if (history.length < 2) {
+                    trendElement.innerHTML = '<i class="fa fa-minus text-gray-500 mr-2"></i><span class="text-gray-600">暂无历史数据</span>';
+                    return;
+                }
+                
+                // 按日期排序
+                history.sort((a, b) => new Date(a.date) - new Date(b.date));
+                
+                // 获取最近两次价格
+                const latest = history[history.length - 1];
+                const previous = history[history.length - 2];
+                const priceDiff = latest.price - previous.price;
+                const percentChange = (priceDiff / previous.price * 100).toFixed(1);
+                
+                if (priceDiff > 0) {
+                    trendElement.innerHTML = `<i class="fa fa-arrow-up text-red-500 mr-2"></i><span class="text-red-500">上涨 ${percentChange}%</span>`;
+                } else if (priceDiff < 0) {
+                    trendElement.innerHTML = `<i class="fa fa-arrow-down text-green-500 mr-2"></i><span class="text-green-500">下降 ${Math.abs(percentChange)}%</span>`;
+                } else {
+                    trendElement.innerHTML = '<i class="fa fa-minus text-gray-500 mr-2"></i><span class="text-gray-600">价格稳定</span>';
+                }
+            }
+        }
+        
+        // 初始化商品管理功能
+        function initProductManagement() {
+            // CSV文件导入
+            const csvFileInput = document.getElementById('csv-file');
+            csvFileInput.addEventListener('change', handleCsvImport);
+            
+            // 手动添加商品表单提交
+            const addProductForm = document.getElementById('add-product-form');
+            addProductForm.addEventListener('submit', handleAddProduct);
+            
+            // 搜索功能
+            const searchInput = document.getElementById('search-product');
+            searchInput.addEventListener('input', handleProductSearch);
+            
+            // 导出数据按钮
+            const exportButton = document.getElementById('export-data');
+            exportButton.addEventListener('click', handleExportData);
+            
+            // 分页按钮
+            document.getElementById('prev-page').addEventListener('click', () => {
+                if (currentPage > 1) {
+                    currentPage--;
+                    updateProductList();
+                }
+            });
+            
+            document.getElementById('next-page').addEventListener('click', () => {
+                const totalPages = Math.ceil(Object.keys(products).length / itemsPerPage);
+                if (currentPage < totalPages) {
+                    currentPage++;
+                    updateProductList();
+                }
+            });
+            
+            // 编辑模态框
+            document.getElementById('close-modal').addEventListener('click', closeEditModal);
+            document.getElementById('cancel-edit').addEventListener('click', closeEditModal);
+            document.getElementById('edit-product-form').addEventListener('submit', handleEditProduct);
+            
+            // 点击模态框外部关闭
+            document.getElementById('edit-modal').addEventListener('click', (e) => {
+                if (e.target === document.getElementById('edit-modal')) {
+                    closeEditModal();
+                }
+            });
+        }
+        
+        // 处理CSV文件导入
+        function handleCsvImport(event) {
+            const file = event.target.files[0];
+            if (!file) return;
+            
+            const importStatus = document.getElementById('import-status');
+            importStatus.innerHTML = '<div class="text-center py-2"><i class="fa fa-spinner fa-spin mr-2"></i> 正在解析CSV文件...</div>';
+            importStatus.classList.remove('hidden');
+            
+            Papa.parse(file, {
+                header: true,
+                skipEmptyLines: true,
+                complete: function(results) {
+                    if (results.errors.length > 0) {
+                        importStatus.innerHTML = `<div class="text-center py-2 text-red-500"><i class="fa fa-exclamation-circle mr-2"></i> 解析CSV文件时出错: ${results.errors[0].message}</div>`;
+                        return;
+                    }
+                    
+                    let importedCount = 0;
+                    let updatedCount = 0;
+                    
+                    results.data.forEach(row => {
+                        const barcode = row['条形码'] || row['barcode'];
+                        if (!barcode) return;
+                        
+                        const name = row['商品名称'] || row['name'] || '未命名商品';
+                        const price = parseFloat(row['价格'] || row['price'] || 0);
+                        const stock = parseInt(row['库存'] || row['stock'] || 0);
+                        const unit = row['单位'] || row['unit'] || '个';
+                        const category = row['类别'] || row['category'] || '未分类';
+                        
+                        const now = new Date().toISOString().split('T')[0];
+                        
+                        if (products[barcode]) {
+                            // 更新现有商品
+                            const oldPrice = products[barcode].price;
+                            products[barcode] = {
+                                ...products[barcode],
+                                name,
+                                price,
+                                stock,
+                                unit,
+                                category,
+                                updatedAt: now
+                            };
+                            
+                            // 如果价格有变化，添加到价格历史
+                            if (oldPrice !== price) {
+                                if (!products[barcode].priceHistory) {
+                                    products[barcode].priceHistory = [];
+                                }
+                                products[barcode].priceHistory.push({
+                                    date: now,
+                                    price: price
+                                });
+                            }
+                            
+                            updatedCount++;
+                        } else {
+                            // 添加新商品
+                            products[barcode] = {
+                                barcode,
+                                name,
+                                price,
+                                stock,
+                                unit,
+                                category,
+                                priceHistory: [{
+                                    date: now,
+                                    price: price
+                                }],
+                                createdAt: now,
+                                updatedAt: now
+                            };
+                            
+                            importedCount++;
+                        }
+                    });
+                    
+                    // 保存更新后的数据
+                    saveProducts();
+                    
+                    // 更新UI
+                    updateProductList();
+                    updateHistoryProductSelect();
+                    
+                    importStatus.innerHTML = `<div class="text-center py-2 text-green-600"><i class="fa fa-check-circle mr-2"></i> 成功导入 ${importedCount} 个新商品，更新 ${updatedCount} 个现有商品</div>`;
+                    
+                    // 重置文件输入
+                    document.getElementById('csv-file').value = '';
+                },
+                error: function(error) {
+                    importStatus.innerHTML = `<div class="text-center py-2 text-red-500"><i class="fa fa-exclamation-circle mr-2"></i> 导入失败: ${error.message}</div>`;
+                }
+            });
+        }
+        
+        // 处理手动添加商品
+        function handleAddProduct(event) {
+            event.preventDefault();
+            
+            const barcode = document.getElementById('barcode').value.trim();
+            const name = document.getElementById('name').value.trim();
+            const price = parseFloat(document.getElementById('price').value);
+            const stock = parseInt(document.getElementById('stock').value) || 0;
+            const unit = document.getElementById('unit').value.trim() || '个';
+            const category = document.getElementById('category').value.trim() || '未分类';
+            
+            if (!barcode || !name || isNaN(price)) {
+                showNotification('输入错误', '请填写必填字段并确保价格为有效数字', 'error');
+                return;
+            }
+            
+            const now = new Date().toISOString().split('T')[0];
+            
+            if (products[barcode]) {
+                showNotification('商品已存在', '该条形码对应的商品已存在，请使用编辑功能修改', 'warning');
+                return;
+            }
+            
+            // 添加新商品
+            products[barcode] = {
+                barcode,
+                name,
+                price,
+                stock,
+                unit,
+                category,
+                priceHistory: [{
+                    date: now,
+                    price: price
+                }],
+                createdAt: now,
+                updatedAt: now
+            };
+            
+            // 保存数据
+            saveProducts();
+            
+            // 更新UI
+            updateProductList();
+            updateHistoryProductSelect();
+            
+            // 重置表单
+            event.target.reset();
+            
+            showNotification('添加成功', `已添加商品: ${name}`, 'success');
+        }
+        
+        // 处理商品搜索
+        function handleProductSearch() {
+            currentPage = 1;
+            updateProductList();
+        }
+        
+        // 处理数据导出
+        function handleExportData() {
+            if (Object.keys(products).length === 0) {
+                showNotification('导出失败', '没有可导出的商品数据', 'warning');
+                return;
+            }
+            
+            // 准备CSV数据
+            const csvData = [
+                ['条形码', '商品名称', '价格', '库存', '单位', '类别']
+            ];
+            
+            Object.values(products).forEach(product => {
+                csvData.push([
+                    product.barcode,
+                    product.name,
+                    product.price,
+                    product.stock || 0,
+                    product.unit || '个',
+                    product.category || '未分类'
+                ]);
+            });
+            
+            // 转换为CSV字符串
+            const csvContent = csvData.map(row => 
+                row.map(field => `"${field}"`).join(',')
+            ).join('\n');
+            
+            // 创建下载链接
+            const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+            const url = URL.createObjectURL(blob);
+            const link = document.createElement('a');
+            link.setAttribute('href', url);
+            link.setAttribute('download', `商品数据_${new Date().toISOString().split('T')[0]}.csv`);
+            link.style.visibility = 'hidden';
+            document.body.appendChild(link);
+            link.click();
+            document.body.removeChild(link);
+            
+            showNotification('导出成功', `已导出 ${Object.keys(products).length} 个商品的数据`, 'success');
+        }
+        
+        // 更新商品列表
+        function updateProductList() {
+            const tableBody = document.getElementById('product-table-body');
+            const searchTerm = document.getElementById('search-product').value.toLowerCase();
+            
+            // 过滤商品
+            let filteredProducts = Object.values(products);
+            if (searchTerm) {
+                filteredProducts = filteredProducts.filter(product => 
+                    product.name.toLowerCase().includes(searchTerm) || 
+                    product.barcode.includes(searchTerm) || 
+                    (product.category && product.category.toLowerCase().includes(searchTerm))
+                );
+            }
+            
+            // 分页
+            const totalItems = filteredProducts.length;
+            const totalPages = Math.ceil(totalItems / itemsPerPage);
+            const startIndex = (currentPage - 1) * itemsPerPage;
+            const endIndex = Math.min(startIndex + itemsPerPage, totalItems);
+            const paginatedProducts = filteredProducts.slice(startIndex, endIndex);
+            
+            // 更新表格内容
+            if (paginatedProducts.length === 0) {
+                tableBody.innerHTML = '<tr><td colspan="7" class="py-4 text-center text-gray-500">没有找到匹配的商品</td></tr>';
+            } else {
+                tableBody.innerHTML = paginatedProducts.map(product => `
+                    <tr class="border-b border-gray-200 hover:bg-gray-50">
+                        <td class="py-3 px-4 text-sm">${product.barcode}</td>
+                        <td class="py-3 px-4 text-sm font-medium">${product.name}</td>
+                        <td class="py-3 px-4 text-sm font-semibold">¥${product.price.toFixed(2)}</td>
+                        <td class="py-3 px-4 text-sm">${product.stock || 0}</td>
+                        <td class="py-3 px-4 text-sm">${product.unit || '个'}</td>
+                        <td class="py-3 px-4 text-sm">${product.category || '未分类'}</td>
+                        <td class="py-3 px-4 text-sm">
+                            <button class="text-blue-600 hover:text-blue-800 mr-3 edit-product" data-barcode="${product.barcode}">
+                                <i class="fa fa-pencil"></i> 编辑
+                            </button>
+                            <button class="text-red-600 hover:text-red-800 delete-product" data-barcode="${product.barcode}">
+                                <i class="fa fa-trash"></i> 删除
+                            </button>
+                        </td>
+                    </tr>
+                `).join('');
+                
+                // 添加编辑和删除事件监听
+                document.querySelectorAll('.edit-product').forEach(button => {
+                    button.addEventListener('click', () => {
+                        const barcode = button.getAttribute('data-barcode');
+                        openEditModal(barcode);
+                    });
+                });
+                
+                document.querySelectorAll('.delete-product').forEach(button => {
+                    button.addEventListener('click', () => {
+                        const barcode = button.getAttribute('data-barcode');
+                        deleteProduct(barcode);
+                    });
+                });
+            }
+            
+            // 更新分页信息
+            document.getElementById('showing-records').textContent = totalItems > 0 ? `${startIndex + 1}-${endIndex}` : '0-0';
+            document.getElementById('total-records').textContent = totalItems;
+            
+            // 更新分页按钮状态
+            document.getElementById('prev-page').disabled = currentPage === 1;
+            document.getElementById('next-page').disabled = currentPage === totalPages || totalPages === 0;
+            
+            if (document.getElementById('prev-page').disabled) {
+                document.getElementById('prev-page').classList.add('opacity-50', 'cursor-not-allowed');
+            } else {
+                document.getElementById('prev-page').classList.remove('opacity-50', 'cursor-not-allowed');
+            }
+            
+            if (document.getElementById('next-page').disabled) {
+                document.getElementById('next-page').classList.add('opacity-50', 'cursor-not-allowed');
+            } else {
+                document.getElementById('next-page').classList.remove('opacity-50', 'cursor-not-allowed');
+            }
+        }
+        
+        // 打开编辑模态框
+        function openEditModal(barcode) {
+            const product = products[barcode];
+            if (!product) return;
+            
+            document.getElementById('edit-barcode').value = product.barcode;
+            document.getElementById('edit-name').value = product.name;
+            document.getElementById('edit-price').value = product.price;
+            document.getElementById('edit-stock').value = product.stock || 0;
+            document.getElementById('edit-unit').value = product.unit || '';
+            document.getElementById('edit-category').value = product.category || '';
+            
+            document.getElementById('edit-modal').classList.remove('hidden');
+        }
+        
+        // 关闭编辑模态框
+        function closeEditModal() {
+            document.getElementById('edit-modal').classList.add('hidden');
+        }
+        
+        // 处理商品编辑
+        function handleEditProduct(event) {
+            event.preventDefault();
+            
+            const barcode = document.getElementById('edit-barcode').value;
+            const name = document.getElementById('edit-name').value.trim();
+            const price = parseFloat(document.getElementById('edit-price').value);
+            const stock = parseInt(document.getElementById('edit-stock').value) || 0;
+            const unit = document.getElementById('edit-unit').value.trim() || '个';
+            const category = document.getElementById('edit-category').value.trim() || '未分类';
+            
+            if (!name || isNaN(price)) {
+                showNotification('输入错误', '请填写必填字段并确保价格为有效数字', 'error');
+                return;
+            }
+            
+            const product = products[barcode];
+            if (!product) {
+                showNotification('编辑失败', '找不到要编辑的商品', 'error');
+                return;
+            }
+            
+            const oldPrice = product.price;
+            const now = new Date().toISOString().split('T')[0];
+            
+            // 更新商品信息
+            products[barcode] = {
+                ...product,
+                name,
+                price,
+                stock,
+                unit,
+                category,
+                updatedAt: now
+            };
+            
+            // 如果价格有变化，添加到价格历史
+            if (oldPrice !== price) {
+                if (!products[barcode].priceHistory) {
+                    products[barcode].priceHistory = [];
+                }
+                products[barcode].priceHistory.push({
+                    date: now,
+                    price: price
+                });
+            }
+            
+            // 保存数据
+            saveProducts();
+            
+            // 更新UI
+            updateProductList();
+            updateHistoryProductSelect();
+            
+            // 如果当前正在查看该商品的历史，更新图表
+            if (document.getElementById('history-product-select').value === barcode) {
+                updatePriceChart(barcode);
+            }
+            
+            // 关闭模态框
+            closeEditModal();
+            
+            showNotification('编辑成功', `已更新商品: ${name}`, 'success');
+        }
+        
+        // 删除商品
+        function deleteProduct(barcode) {
+            const product = products[barcode];
+            if (!product) return;
+            
+            if (confirm(`确定要删除商品 "${product.name}" 吗？此操作不可撤销。`)) {
+                delete products[barcode];
+                
+                // 保存数据
+                saveProducts();
+                
+                // 更新UI
+                updateProductList();
+                updateHistoryProductSelect();
+                
+                showNotification('删除成功', `已删除商品: ${product.name}`, 'success');
+            }
+        }
+        
+        // 初始化价格历史功能
+        function initPriceHistory() {
+            const productSelect = document.getElementById('history-product-select');
+            const dateFrom = document.getElementById('date-from');
+            const dateTo = document.getElementById('date-to');
+            
+            // 设置默认日期范围（最近30天）
+            const today = new Date();
+            const thirtyDaysAgo = new Date();
+            thirtyDaysAgo.setDate(today.getDate() - 30);
+            
+            dateTo.value = formatDateForInput(today);
+            dateFrom.value = formatDateForInput(thirtyDaysAgo);
+            
+            // 商品选择变化事件
+            productSelect.addEventListener('change', () => {
+                const barcode = productSelect.value;
+                if (barcode) {
+                    updatePriceChart(barcode);
+                    updatePriceHistoryTable(barcode);
+                }
+            });
+            
+            // 日期范围变化事件
+            dateFrom.addEventListener('change', () => {
+                if (productSelect.value) {
+                    updatePriceChart(productSelect.value);
+                    updatePriceHistoryTable(productSelect.value);
+                }
+            });
+            
+            dateTo.addEventListener('change', () => {
+                if (productSelect.value) {
+                    updatePriceChart(productSelect.value);
+                    updatePriceHistoryTable(productSelect.value);
+                }
+            });
+        }
+        
+        // 更新历史商品选择器
+        function updateHistoryProductSelect() {
+            const select = document.getElementById('history-product-select');
+            const currentValue = select.value;
+            
+            // 清空现有选项
+            select.innerHTML = '<option value="">-- 请选择商品 --</option>';
+            
+            // 添加商品选项
+            Object.values(products).forEach(product => {
+                const option = document.createElement('option');
+                option.value = product.barcode;
+                option.textContent = `${product.name} (${product.barcode})`;
+                select.appendChild(option);
+            });
+            
+            // 恢复之前选择的值（如果存在）
+            if (currentValue && products[currentValue]) {
+                select.value = currentValue;
+            }
+        }
+        
+        // 更新价格图表
+        function updatePriceChart(barcode) {
+            const product = products[barcode];
+            if (!product || !product.priceHistory || product.priceHistory.length === 0) {
+                if (priceChart) {
+                    priceChart.destroy();
+                    priceChart = null;
+                }
+                return;
+            }
+            
+            const dateFrom = document.getElementById('date-from').value;
+            const dateTo = document.getElementById('date-to').value;
+            
+            // 过滤日期范围内的数据
+            let history = [...product.priceHistory];
+            if (dateFrom) {
+                history = history.filter(item => item.date >= dateFrom);
+            }
+            if (dateTo) {
+                history = history.filter(item => item.date <= dateTo);
+            }
+            
+            // 按日期排序
+            history.sort((a, b) => new Date(a.date) - new Date(b.date));
+            
+            // 准备图表数据
+            const labels = history.map(item => formatDate(item.date));
+            const prices = history.map(item => item.price);
+            
+            // 获取画布上下文
+            const ctx = document.getElementById('price-chart').getContext('2d');
+            
+            // 销毁现有图表
+            if (priceChart) {
+                priceChart.destroy();
+            }
+            
+            // 创建新图表
+            priceChart = new Chart(ctx, {
+                type: 'line',
+                data: {
+                    labels: labels,
+                    datasets: [{
+                        label: `${product.name} 价格趋势`,
+                        data: prices,
+                        borderColor: '#3b82f6',
+                        backgroundColor: 'rgba(59, 130, 246, 0.1)',
+                        borderWidth: 2,
+                        pointBackgroundColor: '#3b82f6',
+                        pointRadius: 4,
+                        pointHoverRadius: 6,
+                        tension: 0.2,
+                        fill: true
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: {
+                        legend: {
+                            display: true,
+                            position: 'top',
+                            labels: {
+                                font: {
+                                    family: 'Inter, system-ui, sans-serif'
+                                }
+                            }
+                        },
+                        tooltip: {
+                            callbacks: {
+                                label: function(context) {
+                                    return `价格: ¥${context.parsed.y.toFixed(2)}`;
+                                }
+                            }
+                        }
+                    },
+                    scales: {
+                        x: {
+                            grid: {
+                                display: false
+                            },
+                            ticks: {
+                                font: {
+                                    family: 'Inter, system-ui, sans-serif'
+                                }
+                            }
+                        },
+                        y: {
+                            beginAtZero: false,
+                            grid: {
+                                color: 'rgba(0, 0, 0, 0.05)'
+                            },
+                            ticks: {
+                                font: {
+                                    family: 'Inter, system-ui, sans-serif'
+                                },
+                                callback: function(value) {
+                                    return '¥' + value.toFixed(2);
+                                }
+                            }
+                        }
+                    }
+                }
+            });
+        }
+        
+        // 更新价格历史表格
+        function updatePriceHistoryTable(barcode) {
+            const product = products[barcode];
+            if (!product || !product.priceHistory || product.priceHistory.length === 0) {
+                document.getElementById('price-history-table').innerHTML = '<tr><td colspan="3" class="py-4 text-center text-gray-500">暂无价格历史记录</td></tr>';
+                return;
+            }
+            
+            const dateFrom = document.getElementById('date-from').value;
+            const dateTo = document.getElementById('date-to').value;
+            
+            // 过滤日期范围内的数据
+            let history = [...product.priceHistory];
+            if (dateFrom) {
+                history = history.filter(item => item.date >= dateFrom);
+            }
+            if (dateTo) {
+                history = history.filter(item => item.date <= dateTo);
+            }
+            
+            // 按日期排序（最新的在前）
+            history.sort((a, b) => new Date(b.date) - new Date(a.date));
+            
+            // 更新表格内容
+            if (history.length === 0) {
+                document.getElementById('price-history-table').innerHTML = '<tr><td colspan="3" class="py-4 text-center text-gray-500">选定日期范围内无价格历史记录</td></tr>';
+            } else {
+                let tableHtml = '';
+                for (let i = 0; i < history.length; i++) {
+                    const item = history[i];
+                    let change = '';
+                    let changeClass = '';
+                    
+                    if (i < history.length - 1) {
+                        const prevItem = history[i + 1];
+                        const diff = item.price - prevItem.price;
+                        const percent = (diff / prevItem.price * 100).toFixed(1);
+                        
+                        if (diff > 0) {
+                            change = `+¥${diff.toFixed(2)} (+${percent}%)`;
+                            changeClass = 'text-red-500';
+                        } else if (diff < 0) {
+                            change = `-¥${Math.abs(diff).toFixed(2)} (-${Math.abs(percent)}%)`;
+                            changeClass = 'text-green-500';
+                        } else {
+                            change = '持平';
+                            changeClass = 'text-gray-500';
+                        }
+                    }
+                    
+                    tableHtml += `
+                        <tr class="border-b border-gray-200">
+                            <td class="py-3 px-4 text-sm">${formatDate(item.date)}</td>
+                            <td class="py-3 px-4 text-sm font-semibold">¥${item.price.toFixed(2)}</td>
+                            <td class="py-3 px-4 text-sm ${changeClass}">${change || '-'}</td>
+                        </tr>
+                    `;
+                }
+                
+                document.getElementById('price-history-table').innerHTML = tableHtml;
+            }
+        }
+        
+        // 初始化通知功能
+        function initNotification() {
+            const notification = document.getElementById('notification');
+            const closeButton = document.getElementById('close-notification');
+            
+            closeButton.addEventListener('click', () => {
+                hideNotification();
+            });
+            
+            // 点击通知外部关闭
+            notification.addEventListener('click', (e) => {
+                if (e.target === notification) {
+                    hideNotification();
+                }
+            });
+        }
+        
+        // 显示通知
+        function showNotification(title, message, type = 'info') {
+            const notification = document.getElementById('notification');
+            const titleElement = document.getElementById('notification-title');
+            const messageElement = document.getElementById('notification-message');
+            const iconElement = document.getElementById('notification-icon');
+            const iconIElement = document.getElementById('notification-icon-i');
+            
+            // 设置通知内容
+            titleElement.textContent = title;
+            messageElement.textContent = message;
+            
+            // 设置通知类型样式
+            iconElement.className = 'flex-shrink-0 rounded-full p-2 mr-3';
+            iconIElement.className = 'fa';
+            
+            switch (type) {
+                case 'success':
+                    iconElement.classList.add('bg-green-100');
+                    iconIElement.classList.add('fa-check', 'text-green-600');
+                    break;
+                case 'error':
+                    iconElement.classList.add('bg-red-100');
+                    iconIElement.classList.add('fa-times', 'text-red-600');
+                    break;
+                case 'warning':
+                    iconElement.classList.add('bg-yellow-100');
+                    iconIElement.classList.add('fa-exclamation', 'text-yellow-600');
+                    break;
+                default:
+                    iconElement.classList.add('bg-blue-100');
+                    iconIElement.classList.add('fa-info', 'text-blue-600');
+            }
+            
+            // 显示通知
+            notification.classList.remove('translate-y-full', 'opacity-0');
+            
+            // 3秒后自动隐藏
+            clearTimeout(notification.hideTimeout);
+            notification.hideTimeout = setTimeout(() => {
+                hideNotification();
+            }, 3000);
+        }
+        
+        // 隐藏通知
+        function hideNotification() {
+            const notification = document.getElementById('notification');
+            notification.classList.add('translate-y-full', 'opacity-0');
+        }
+        
+        // 格式化日期
+        function formatDate(dateString) {
+            if (!dateString) return '';
+            
+            const date = new Date(dateString);
+            return date.toLocaleDateString('zh-CN', {
+                year: 'numeric',
+                month: '2-digit',
+                day: '2-digit'
+            });
+        }
+        
+        // 格式化日期为输入框格式
+        function formatDateForInput(date) {
+            const year = date.getFullYear();
+            const month = String(date.getMonth() + 1).padStart(2, '0');
+            const day = String(date.getDate()).padStart(2, '0');
+            return `${year}-${month}-${day}`;
+        }
+    </script>
+</body>
 </html>
